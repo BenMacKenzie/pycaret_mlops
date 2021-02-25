@@ -6,9 +6,11 @@ import os
 
 
 
-def save_model_and_metadata(expirement_name, model, cat_features_index):
-    exp_id = mlflow.create_experiment(expirement_name)
+def build_model(name, data, cat_features_index, target, hyper_parameters=None):
+    exp_id = mlflow.create_experiment(name)
     mlflow.start_run(experiment_id=exp_id)
+    clf1 = setup(data, preprocess=False, target=target, session_id=124, log_experiment=False, silent=True)
+
     X_train = get_config('X_train')
     y_train = get_config('y_train')
     X_test = get_config('X_test')
@@ -23,7 +25,6 @@ def save_model_and_metadata(expirement_name, model, cat_features_index):
     mlflow.log_artifact('config.pkl')
     os.remove("Train.csv")
     os.remove("Test.csv")
-
     os.remove('config.pkl')
     cat_features = []
     columns = X_train.columns.to_list()
@@ -31,12 +32,20 @@ def save_model_and_metadata(expirement_name, model, cat_features_index):
         cat_features.append(columns[i])
 
     mlflow.log_param('cat_features', cat_features)
+    model = create_model('catboost', cat_features=cat_features_index)
+
+    tuned_model = tune_model(model)
+    cv_results = pull()
+    #cv_results.drop(['Model'], axis=1, inplace=True)
+    cv_results = cv_results.to_dict(orient='records')[0]
+    mlflow.log_metrics({"cross_validation": cv_results})  #this doesn't work
     mlflow.log_params(model.get_all_params())
+
     predict_model(model)
     cb_results = pull()
     cb_results.drop(['Model'], axis=1, inplace=True)
     cb_results = cb_results.to_dict(orient='records')[0]
-    mlflow.log_metrics(cb_results)
+    mlflow.log_metrics({"hold_out": cb_results})
     final_model = finalize_model(model)
     final_model.save_model('model.cbm')
     mlflow.log_artifact('model.cbm')
@@ -54,18 +63,9 @@ def rebuild_model(expirement_id):
     pass
 
 
-
-def build_model(name):
-    #this would be done from notebook
-    data = get_data('titanic')
-    data = data.drop(['Cabin'], axis=1)
-    data=data.dropna()
-    clf1 = setup(data, preprocess=False, target='Survived', session_id=124, log_experiment=False, silent=True)
-    X_train = get_config('X_train')
-    cat_features  = np.where(X_train.dtypes != np.float32)[0]
-    cb = create_model('catboost', cat_features=cat_features)
-    cb_tune = tune_model(cb)
-    save_model_and_metadata(name, cb_tune, cat_features)
-
-
-build_model("feb25_2")
+#from notebook
+data = get_data('titanic')
+data = data.drop(['Cabin'], axis=1)
+data=data.dropna()
+cat_features_index = [1,2, 3, 5, 6, 7, 9]
+build_model("feb28", data, cat_features_index, "Survived")
